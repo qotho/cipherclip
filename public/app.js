@@ -46,6 +46,11 @@ createApp({
     const paginationMode = ref(
       localStorage.getItem('cc_pagination_mode') || 'infinite'
     );
+    // Privacy: blurOnStartup is the saved preference; blurThumbnails is the
+    // live state. Toggling blurThumbnails is temporary (resets on reload) and
+    // never touches the saved preference.
+    const blurOnStartup = ref(localStorage.getItem('cc_blur_on_startup') === 'true');
+    const blurThumbnails = ref(blurOnStartup.value);
     const infiniteBatchSize = 24;
     const infiniteLimit = ref(infiniteBatchSize);
     const currentPage = ref(1);
@@ -445,6 +450,21 @@ createApp({
     watch(viewMode, (val) => {
       localStorage.setItem('cc_view_mode', val);
     });
+
+    watch(blurOnStartup, (val) => {
+      localStorage.setItem('cc_blur_on_startup', val ? 'true' : 'false');
+    });
+
+    // Applied on <body> so it covers the grid and the modals (entry preview,
+    // image pickers). Runs immediately so thumbnails are blurred from the
+    // very first render when the startup preference is on.
+    watch(
+      blurThumbnails,
+      (val) => {
+        document.body.classList.toggle('blur-thumbnails', val);
+      },
+      { immediate: true }
+    );
 
     watch(
       () => batchForm.runInBackground,
@@ -1440,6 +1460,8 @@ createApp({
       searchQuery,
       sortBy,
       viewMode,
+      blurThumbnails,
+      blurOnStartup,
       paginationMode,
       currentPage,
       totalPages,

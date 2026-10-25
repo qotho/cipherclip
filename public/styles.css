@@ -930,6 +930,17 @@ body {
   color: #c7d2fe;
 }
 
+/* ==================== PRIVACY: BLURRED THUMBNAILS ==================== */
+/* Toggled via body.blur-thumbnails. Selectors are deliberately specific so the
+   blur also wins over the card hover zoom; scale(1.1) hides the soft edge. */
+body.blur-thumbnails .entry-card .card-thumb-wrap img,
+body.blur-thumbnails .entry-card:hover .card-thumb-wrap img,
+body.blur-thumbnails .thumb-preview-frame img,
+body.blur-thumbnails .pinterest-card img {
+  filter: blur(18px);
+  transform: scale(1.1);
+}
+
 /* ==================== EMPTY STATE ==================== */
 .empty-state {
   margin: auto;

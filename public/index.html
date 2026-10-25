@@ -337,6 +337,26 @@
               <button
                 type="button"
                 class="icon-btn"
+                :class="{ active: blurThumbnails }"
+                @click="blurThumbnails = !blurThumbnails"
+                :title="blurThumbnails ? 'Thumbnails blurred — click to show' : 'Blur thumbnails (temporary, for privacy)'"
+                :aria-pressed="blurThumbnails"
+              >
+                <svg v-if="!blurThumbnails" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
+              </button>
+            </div>
+
+            <div class="view-toggle">
+              <button
+                type="button"
+                class="icon-btn"
                 :class="{ active: viewMode === 'grid' }"
                 @click="viewMode = 'grid'"
                 title="Grid View"
@@ -1279,6 +1299,19 @@
             <div><strong>Encryption Specification:</strong> AES-256-GCM authenticated encryption with 32-byte scrypt key derivation and fresh 12-byte random IV on every save.</div>
             <div><strong>Headless Browser Isolation:</strong> Each URL is inspected inside a disposable incognito context that is wiped immediately after thumbnail capture.</div>
           </div>
+
+          <hr class="divider" />
+
+          <h4 style="margin-bottom: 12px">Display Privacy</h4>
+          <label class="batch-bg-option" style="margin-top: 0">
+            <input type="checkbox" v-model="blurOnStartup" />
+            <div>
+              <strong>Blur thumbnails on startup</strong>
+              <div class="form-hint" style="margin-top: 2px;">
+                Saved on this computer. Use the eye button in the top bar to blur or reveal thumbnails temporarily without changing this setting.
+              </div>
+            </div>
+          </label>
 
           <hr class="divider" />
 
