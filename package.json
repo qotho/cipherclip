@@ -1,0 +1,15 @@
+{
+  "name": "cipherclip-video-catalog",
+  "version": "1.0.0",
+  "description": "Privacy-first encrypted local video website catalog with headless browser thumbnail capture",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js --no-open",
+    "test": "node test/verify.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "private": true
+}
