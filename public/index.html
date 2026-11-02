@@ -438,6 +438,14 @@
               </option>
             </select>
             <button @click="handleBulkAddTag" class="btn btn-secondary btn-sm">+ Add Tag</button>
+            <button
+              @click="handleBulkRetryThumbnails"
+              :disabled="bulkRetryingThumbs"
+              class="btn btn-secondary btn-sm"
+              title="Retry thumbnail discovery for selected entries"
+            >
+              {{ bulkRetryingThumbs ? 'Retrying Thumbnails...' : 'Retry Thumbnails' }}
+            </button>
             <button @click="handleBulkDelete" class="btn btn-danger-outline btn-sm">Delete Selected</button>
             <button @click="selectedEntryIds = []" class="btn btn-ghost btn-sm">Cancel</button>
           </div>
@@ -549,6 +557,26 @@
                 </div>
                 <button
                   type="button"
+                  class="card-retry-btn"
+                  :disabled="retryingThumbIds.includes(entry.id)"
+                  @click.stop="retryEntryThumbnail(entry)"
+                  title="Retry thumbnail discovery"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.2"
+                    :class="{ 'spin-icon': retryingThumbIds.includes(entry.id) }"
+                  >
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                  </svg>
+                </button>
+                <button
+                  type="button"
                   class="card-fav-btn"
                   :class="{ active: entry.favorite }"
                   @click.stop="toggleFavorite(entry)"
@@ -556,6 +584,10 @@
                 >
                   &#9733;
                 </button>
+                <div v-if="retryingThumbIds.includes(entry.id)" class="card-thumb-retrying-overlay">
+                  <div class="spinner-sm"></div>
+                  <span>Discovering thumbnail...</span>
+                </div>
                 <img :src="entry.thumbnailDataUrl" :alt="entry.title" loading="lazy" />
                 <div class="card-badges-bottom">
                   <span
@@ -592,6 +624,16 @@
                       title="Copy full URL to clipboard"
                     >
                       Copy URL
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-xs"
+                      style="padding: 1px 5px; font-size: 0.68rem;"
+                      :disabled="retryingThumbIds.includes(entry.id)"
+                      @click.stop="retryEntryThumbnail(entry)"
+                      title="Retry thumbnail discovery from webpage"
+                    >
+                      {{ retryingThumbIds.includes(entry.id) ? 'Retrying...' : 'Retry Thumbnail' }}
                     </button>
                   </div>
                   <span
@@ -1096,11 +1138,11 @@
                 </button>
                 <button
                   type="button"
-                  class="btn btn-ghost btn-sm"
-                  :disabled="refreshingThumb"
+                  class="btn btn-secondary btn-sm"
+                  :disabled="refreshingThumb || retryingThumbIds.includes(editingEntry.id)"
                   @click="handleRefreshThumbnail"
                 >
-                  {{ refreshingThumb ? 'Re-scanning Page...' : 'Re-scan Webpage for Thumbnail' }}
+                  {{ (refreshingThumb || retryingThumbIds.includes(editingEntry.id)) ? 'Retrying Thumbnail Discovery...' : 'Retry Thumbnail Discovery' }}
                 </button>
               </div>
               <div

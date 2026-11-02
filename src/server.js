@@ -389,7 +389,7 @@ function createAppServer(options = {}) {
         });
       }
 
-      // Refresh thumbnail for an existing entry
+      // Refresh / retry thumbnail discovery for an existing entry
       const refreshMatch = pathname.match(
         /^\/api\/entries\/([^/]+)\/refresh-thumbnail$/
       );
@@ -402,12 +402,66 @@ function createAppServer(options = {}) {
         }
 
         const inspection = await extractor.inspectUrl(existing.url);
-        if (!inspection.found) {
-          return sendJson(res, 400, {
-            error:
-              inspection.reason ||
-              'Could not detect a video on this page during refresh.',
+        if (!vault.isUnlocked()) {
+          return sendJson(res, 401, {
+            error: 'Vault was locked while retrying thumbnail discovery.',
+            code: 'VAULT_LOCKED',
           });
+        }
+
+        const shouldUpdateTitle =
+          (!existing.title ||
+            existing.title === existing.url ||
+            existing.title === existing.finalUrl) &&
+          inspection.title &&
+          inspection.title !== existing.url;
+
+        if (!inspection.found) {
+          const bestCandidate =
+            Array.isArray(inspection.candidateThumbnails) &&
+            inspection.candidateThumbnails.length > 0
+              ? inspection.candidateThumbnails[0]
+              : null;
+
+          if (!bestCandidate?.dataUrl) {
+            return sendJson(res, 400, {
+              error:
+                inspection.reason ||
+                'Could not discover a thumbnail on this page.',
+            });
+          }
+
+          const mergedTags = [
+            ...(existing.tags || []),
+            ...(inspection.discoveredTags || []),
+          ];
+
+          const isOgImage =
+            typeof bestCandidate.label === 'string' &&
+            bestCandidate.label.toLowerCase().includes('og:image');
+
+          const updatedVideoInfo = {
+            ...(existing.videoInfo || {}),
+            width: bestCandidate.width || existing.videoInfo?.width || 480,
+            height: bestCandidate.height || existing.videoInfo?.height || 270,
+            selectionReason:
+              bestCandidate.label ||
+              existing.videoInfo?.selectionReason ||
+              'Page preview image',
+            thumbnailSource: isOgImage ? 'og-image' : 'page-preview',
+          };
+
+          const patch = {
+            thumbnailDataUrl: bestCandidate.dataUrl,
+            videoInfo: updatedVideoInfo,
+            tags: mergedTags,
+          };
+          if (shouldUpdateTitle) {
+            patch.title = inspection.title;
+          }
+
+          const updated = vault.updateEntry(entryId, patch);
+          return sendJson(res, 200, { entry: updated });
         }
 
         const mergedTags = [
@@ -415,11 +469,16 @@ function createAppServer(options = {}) {
           ...(inspection.discoveredTags || []),
         ];
 
-        const updated = vault.updateEntry(entryId, {
+        const patch = {
           thumbnailDataUrl: inspection.thumbnailDataUrl,
           videoInfo: inspection.videoInfo,
           tags: mergedTags,
-        });
+        };
+        if (shouldUpdateTitle) {
+          patch.title = inspection.title;
+        }
+
+        const updated = vault.updateEntry(entryId, patch);
         return sendJson(res, 200, { entry: updated });
       }
 

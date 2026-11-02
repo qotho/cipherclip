@@ -587,6 +587,34 @@ const IN_PAGE_DETECTION_SCRIPT = `
     return r.width >= minW && r.height >= minH;
   }
 
+  function findOgImageUrl() {
+    const selectors = [
+      'meta[property="og:image:secure_url" i]',
+      'meta[property="og:image:url" i]',
+      'meta[property="og:image" i]',
+      'meta[name="og:image:secure_url" i]',
+      'meta[name="og:image:url" i]',
+      'meta[name="og:image" i]',
+      'meta[property="twitter:image:src" i]',
+      'meta[name="twitter:image:src" i]',
+      'meta[property="twitter:image" i]',
+      'meta[name="twitter:image" i]',
+      'meta[itemprop="thumbnailUrl" i]',
+      'meta[itemprop="image" i]',
+      'link[rel="image_src" i]'
+    ];
+    for (const sel of selectors) {
+      try {
+        for (const el of document.querySelectorAll(sel)) {
+          const raw = el.content || el.getAttribute('content') || el.href || el.getAttribute('href') || '';
+          const resolved = absUrl(raw);
+          if (resolved && !adUrlRegex.test(resolved)) return resolved;
+        }
+      } catch {}
+    }
+    return null;
+  }
+
   const meta = {
     title: (
       document.querySelector('meta[property="og:title"]')?.content ||
@@ -602,12 +630,7 @@ const IN_PAGE_DETECTION_SCRIPT = `
       document.querySelector('meta[name="twitter:player"]')?.content ||
       document.querySelector('meta[name="twitter:player:stream"]')?.content
     ),
-    ogImage: absUrl(
-      document.querySelector('meta[property="og:image:secure_url"]')?.content ||
-      document.querySelector('meta[property="og:image"]')?.content ||
-      document.querySelector('meta[name="twitter:image"]')?.content ||
-      document.querySelector('link[rel="image_src"]')?.href
-    ),
+    ogImage: findOgImageUrl(),
     ogVideoWidth: parseInt(document.querySelector('meta[property="og:video:width"]')?.content || '0', 10) || 0,
     ogVideoHeight: parseInt(document.querySelector('meta[property="og:video:height"]')?.content || '0', 10) || 0,
     jsonLdVideos: []
@@ -891,14 +914,21 @@ const IN_PAGE_DETECTION_SCRIPT = `
   // ==================== TAG & CATEGORY AUTO-DISCOVERY ====================
   function discoverPageTags() {
     const discovered = [];
-    const seenLower = new Set();
+    const seenLower = new Map();
 
     // UI action labels / non-tag words to exclude
     const stopTagRegex = /^(tags?|categories|category|all\\s+tags?|all\\s+categories|more|show\\s+more|show\\s+less|less|view\\s+all|see\\s+all|load\\s+more|add\\s+tag|suggest\\s+tags?|edit\\s+tags?|edit|none|n\\/a|home|videos?|watch|share|report|download|embed|subscribe|follow|login|log\\s+in|sign\\s+in|sign\\s+up|register|reply|comments?|\\+|\\.\\.\\.|…|\\d+)$/i;
 
     // Matches "tag", "tags", "category", "categories" as distinct words/tokens or camelCase boundaries
     // (avoids false positives on "stage", "footage", "vintage", "advantage", "instagram", "catalog")
-    const tagWordBoundaryRegex = /(?:^|[\\s_\\-:./]|(?=[A-Z]))(tags?|categories|category)(?:$|[\\s_\\-:./]|(?=[A-Z0-9]))/i;
+    const tagWordBoundaryRegex = /(?:^|[\\s_\\-:./])(tags?|categories|category)(?:$|[\\s_\\-:./0-9])/i;
+    function hasTagWordBoundary(str) {
+      if (!str) return false;
+      const deCamel = String(str)
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+      return tagWordBoundaryRegex.test(deCamel);
+    }
 
     // Matches visible container labels like "Tags:", "Categories", "Category:", "Video Tags:"
     const labelHeadingRegex = /^(?:video\\s+|post\\s+|media\\s+|article\\s+|related\\s+)?(tags?|categories|category)\\s*:?$/i;
@@ -906,12 +936,16 @@ const IN_PAGE_DETECTION_SCRIPT = `
     // URL path patterns common to tag & category links
     const tagHrefRegex = /(?:\\/(?:tags?|categories|category|cat|c|t)\\/[^/?#]+|[?&](?:tags?|categories|category|cat)=[^&#]+)/i;
 
+    // Explicit data-testid / data-role / data-test / data-qa / data-cy selector for tag & category containers
+    const explicitTagAttrSelector =
+      '[data-testid*="tag" i], [data-testid*="categor" i], [data-role*="tag" i], [data-role*="categor" i], [data-test*="tag" i], [data-test*="categor" i], [data-qa*="tag" i], [data-qa*="categor" i], [data-cy*="tag" i], [data-cy*="categor" i]';
+
     function isInsideGlobalNavOrAd(el) {
       if (!el || !el.closest) return false;
       if (isElementOrAncestorAd(el)) return true;
       const navAncestor = el.closest('header, nav, footer, [role="navigation"], [role="banner"], [role="contentinfo"]');
       if (navAncestor) {
-        if (!el.closest('[data-testid*="tag" i], [data-testid*="categor" i]')) {
+        if (!el.closest(explicitTagAttrSelector)) {
           return true;
         }
       }
@@ -928,7 +962,10 @@ const IN_PAGE_DETECTION_SCRIPT = `
       }
       for (const child of Array.from(clone.querySelectorAll('*'))) {
         const t = (child.textContent || '').trim();
-        if (/^(?:\\(?\\d[\\d,.]*[kKmM]?\\)?|\\+)$/.test(t)) {
+        if (
+          t === '+' ||
+          (/^\\(?\\d[\\d,.]*[kKmM]?\\)?$/.test(t) && (clone.textContent || '').trim() !== t)
+        ) {
           child.remove();
         }
       }
@@ -936,6 +973,7 @@ const IN_PAGE_DETECTION_SCRIPT = `
       let raw = (clone.textContent || a.getAttribute('title') || a.getAttribute('aria-label') || '').trim();
       raw = raw
         .replace(/^[#•·▸►|+\\-\\s]+/, '')
+        .replace(/[\\s+•·▸►]+$/, '')
         .replace(/\\s*\\(\\d[\\d,.]*[kKmM]?\\)\\s*$/, '')
         .replace(/\\s+\\d[\\d,.]*[kKmM]?$/, '')
         .replace(/\\s+/g, ' ')
@@ -959,9 +997,16 @@ const IN_PAGE_DETECTION_SCRIPT = `
       if (!cleaned || cleaned.length < 2 || cleaned.length > 36) return;
       if (stopTagRegex.test(cleaned)) return;
       if (cleaned.split(/\\s+/).length > 4) return;
-      if (seenLower.has(cleaned)) return;
-      seenLower.add(cleaned);
-      discovered.push({ tag: cleaned, confidence });
+      const existing = seenLower.get(cleaned);
+      if (existing) {
+        if (confidence > existing.confidence) {
+          existing.confidence = confidence;
+        }
+        return;
+      }
+      const entry = { tag: cleaned, confidence };
+      seenLower.set(cleaned, entry);
+      discovered.push(entry);
     }
 
     function collectAnchorsFromContainer(container, baseConfidence) {
@@ -983,17 +1028,19 @@ const IN_PAGE_DETECTION_SCRIPT = `
         }
         return;
       }
-      if (anchors.length > 60) return;
+      const maxAnchors = baseConfidence >= 10 ? 120 : 60;
+      const maxDepth = baseConfidence >= 10 ? 10 : 7;
+      if (anchors.length > maxAnchors) return;
 
       for (const a of anchors) {
         if (isInsideGlobalNavOrAd(a)) continue;
         let depth = 0;
         let curr = a;
-        while (curr && curr !== container && depth < 10) {
+        while (curr && curr !== container && depth < 12) {
           curr = curr.parentElement;
           depth++;
         }
-        if (depth > 7) continue;
+        if (depth > maxDepth) continue;
 
         const text = extractCleanAnchorTagText(a);
         if (!text) continue;
@@ -1003,11 +1050,9 @@ const IN_PAGE_DETECTION_SCRIPT = `
       }
     }
 
-    // 1. HIGHEST PRIORITY: Elements with data-testid / data-test / data-qa / data-cy containing "tag" or "categor"
+    // 1. HIGHEST PRIORITY: Elements with data-testid / data-role / data-test / data-qa / data-cy containing "tag" or "categor"
     try {
-      const testIdNodes = document.querySelectorAll(
-        '[data-testid*="tag" i], [data-testid*="categor" i], [data-test*="tag" i], [data-test*="categor" i], [data-qa*="tag" i], [data-qa*="categor" i], [data-cy*="tag" i], [data-cy*="categor" i]'
-      );
+      const testIdNodes = document.querySelectorAll(explicitTagAttrSelector);
       for (const node of testIdNodes) {
         if (isInsideGlobalNavOrAd(node)) continue;
         collectAnchorsFromContainer(node, 10);
@@ -1042,7 +1087,7 @@ const IN_PAGE_DETECTION_SCRIPT = `
           }
         }
         const combinedAttr = idStr + ' ' + clsStr + ' ' + ariaStr + ' ' + dataStr;
-        if (tagWordBoundaryRegex.test(combinedAttr)) {
+        if (hasTagWordBoundary(combinedAttr)) {
           collectAnchorsFromContainer(el, 7);
         }
       }
@@ -1371,7 +1416,7 @@ class VideoExtractor {
               if (!url) return Promise.resolve(null);
               return new Promise(resolve => {
                 const img = new Image();
-                const timer = setTimeout(() => resolve(null), 2500);
+                const timer = setTimeout(() => resolve(null), 3500);
                 img.onload = () => { clearTimeout(timer); resolve(img); };
                 img.onerror = () => { clearTimeout(timer); resolve(null); };
                 img.src = url;
@@ -1391,11 +1436,36 @@ class VideoExtractor {
               } catch {}
             }
 
-            // 1. Meta preview images (og:image, twitter:image)
-            const ogImg = document.querySelector('meta[property="og:image:secure_url"]')?.content ||
-                          document.querySelector('meta[property="og:image"]')?.content ||
-                          document.querySelector('meta[name="twitter:image"]')?.content;
-            if (ogImg) addUrlCandidate(ogImg, 'Page Preview Image (og:image)', 2.0);
+            // 1. Meta preview images (og:image, twitter:image) — highest priority
+            const ogSelectors = [
+              'meta[property="og:image:secure_url" i]',
+              'meta[property="og:image:url" i]',
+              'meta[property="og:image" i]',
+              'meta[name="og:image:secure_url" i]',
+              'meta[name="og:image:url" i]',
+              'meta[name="og:image" i]',
+              'meta[property="twitter:image:src" i]',
+              'meta[name="twitter:image:src" i]',
+              'meta[property="twitter:image" i]',
+              'meta[name="twitter:image" i]',
+              'meta[itemprop="thumbnailUrl" i]',
+              'meta[itemprop="image" i]',
+              'link[rel="image_src" i]'
+            ];
+            let ogImg = null;
+            for (const sel of ogSelectors) {
+              try {
+                for (const el of document.querySelectorAll(sel)) {
+                  const val = el.content || el.getAttribute('content') || el.href || el.getAttribute('href') || '';
+                  if (val && val.trim()) {
+                    ogImg = val.trim();
+                    break;
+                  }
+                }
+                if (ogImg) break;
+              } catch {}
+            }
+            if (ogImg) addUrlCandidate(ogImg, 'Page Preview Image (og:image)', 100.0);
 
             // 2. Any <video> elements or video posters
             for (const v of document.querySelectorAll('video')) {
@@ -1588,6 +1658,8 @@ class VideoExtractor {
       await cdp.send('Page.enable', {}, sessionId);
       await cdp.send('Runtime.enable', {}, sessionId);
       await cdp.send('Network.enable', {}, sessionId);
+      await cdp.send('Page.setBypassCSP', { enabled: true }, sessionId).catch(() => {});
+      await cdp.send('Page.setBypassCSP', { enabled: true }, sessionId).catch(() => {});
 
       const loadPromise = cdp.onceEvent('Page.loadEventFired', sessionId, 12000);
       await cdp.send('Page.navigate', { url: targetUrl }, sessionId, 15000);
@@ -1661,6 +1733,7 @@ class VideoExtractor {
       await cdp.send('Page.enable', {}, sessionId);
       await cdp.send('Runtime.enable', {}, sessionId);
       await cdp.send('Network.enable', {}, sessionId);
+      await cdp.send('Page.setBypassCSP', { enabled: true }, sessionId).catch(() => {});
 
       const loadPromise = cdp.onceEvent('Page.loadEventFired', sessionId, 12000);
       await cdp.send('Page.navigate', { url: targetUrl }, sessionId, 15000);
@@ -1755,6 +1828,7 @@ class VideoExtractor {
       await cdp.send('Page.enable', {}, sessionId);
       await cdp.send('Runtime.enable', {}, sessionId);
       await cdp.send('Network.enable', {}, sessionId);
+      await cdp.send('Page.setBypassCSP', { enabled: true }, sessionId).catch(() => {});
 
       await cdp.send(
         'Network.setUserAgentOverride',
@@ -1905,13 +1979,13 @@ class VideoExtractor {
           ? detectPlatformFromUrl(mainCandidate.videoSrc)
           : null);
 
+      const ogImageUrl = detection.meta?.ogImage || null;
       const candidatePosterUrls = [
         mainCandidate.posterUrl,
         embeddedPlatformHint?.thumbnailUrl,
         embeddedPlatformHint?.fallbackThumbnailUrl,
         primaryJsonLd?.thumbnailUrl,
-        detection.meta?.ogImage,
-      ].filter(Boolean);
+      ].filter((u) => u && u !== ogImageUrl);
 
       let directVideoFrameDataUrl = null;
       let elementScreenshotDataUrl = null;
@@ -2041,7 +2115,7 @@ class VideoExtractor {
 
               // D. Only extract a direct <video> frame if the <video> is not an ad and we need a decoded frame
               let directVideoDataUrl = null;
-              if (vid && !${Boolean(mainCandidate.posterUrl)}) {
+              if (vid && !${Boolean(ogImageUrl || mainCandidate.posterUrl)}) {
                 try {
                   vid.muted = true;
                   if (vid.readyState < 2 && vid.preload === 'none') {
@@ -2130,6 +2204,14 @@ class VideoExtractor {
         }
       }
 
+      let fetchedOgDataUrl = null;
+      if (ogImageUrl) {
+        fetchedOgDataUrl = await fetchImageAsDataUrl(
+          ogImageUrl,
+          detection.finalUrl || targetUrl
+        );
+      }
+
       let fetchedPosterDataUrl = null;
       for (const posterUrl of candidatePosterUrls) {
         fetchedPosterDataUrl = await fetchImageAsDataUrl(
@@ -2139,17 +2221,19 @@ class VideoExtractor {
         if (fetchedPosterDataUrl) break;
       }
 
-      // Priority order to avoid capturing pre-roll/autoplay ad streams:
-      // 1. Main video player's explicit poster / preview image (posterImg)
-      // 2. Isolated snapshot of the main playable video player (elemImg — shows the player + play button/poster)
-      // 3. Direct decoded <video> frame buffer (directImg — fallback if player snapshot is blank/black)
+      // Priority order:
+      // 1. Page Preview Image (og:image) — preferred primary thumbnail when available
+      // 2. Main video player's explicit poster / preview image (posterImg)
+      // 3. Isolated snapshot of the main playable video player (elemImg — shows the player + play button/poster)
+      // 4. Direct decoded <video> frame buffer (directImg — fallback if player snapshot is blank/black)
       const resizeRes = await cdp.send(
         'Runtime.evaluate',
         {
           expression: `(async () => {
             const W = ${THUMBNAIL_WIDTH};
             const H = ${THUMBNAIL_HEIGHT};
-            const posterSrc = ${JSON.stringify(fetchedPosterDataUrl)};
+            const ogSrc = ${JSON.stringify(fetchedOgDataUrl || ogImageUrl || null)};
+            const posterSrc = ${JSON.stringify(fetchedPosterDataUrl || candidatePosterUrls[0] || null)};
             const elemSrc = ${JSON.stringify(elementScreenshotDataUrl)};
             const directSrc = ${JSON.stringify(directVideoFrameDataUrl)};
 
@@ -2157,8 +2241,9 @@ class VideoExtractor {
               if (!src) return Promise.resolve(null);
               return new Promise((resolve) => {
                 const img = new Image();
-                img.onload = () => resolve(img);
-                img.onerror = () => resolve(null);
+                const timer = setTimeout(() => resolve(null), 3500);
+                img.onload = () => { clearTimeout(timer); resolve(img); };
+                img.onerror = () => { clearTimeout(timer); resolve(null); };
                 img.src = src;
               });
             }
@@ -2186,12 +2271,14 @@ class VideoExtractor {
               return { valid, stdDev, mean };
             }
 
-            const [posterImg, elemImg, directImg] = await Promise.all([
+            const [ogImg, posterImg, elemImg, directImg] = await Promise.all([
+              loadImg(ogSrc),
               loadImg(posterSrc),
               loadImg(elemSrc),
               loadImg(directSrc)
             ]);
 
+            const ogStats = analyzeImage(ogImg);
             const posterStats = analyzeImage(posterImg);
             const elemStats = analyzeImage(elemImg);
             const directStats = analyzeImage(directImg);
@@ -2199,7 +2286,10 @@ class VideoExtractor {
             let chosenImg = null;
             let sourceType = 'video-player';
 
-            if (posterImg && posterStats.valid) {
+            if (ogImg && ogStats.valid && ogImg.width >= 80 && ogImg.height >= 50) {
+              chosenImg = ogImg;
+              sourceType = 'og-image';
+            } else if (posterImg && posterStats.valid) {
               chosenImg = posterImg;
               sourceType = 'main-player-poster';
             } else if (elemImg && elemStats.valid) {
@@ -2208,6 +2298,9 @@ class VideoExtractor {
             } else if (directImg && directStats.valid) {
               chosenImg = directImg;
               sourceType = 'direct-video-frame';
+            } else if (ogImg && ogImg.width >= 80 && ogImg.height >= 50) {
+              chosenImg = ogImg;
+              sourceType = 'og-image';
             } else if (elemImg) {
               chosenImg = elemImg;
               sourceType = 'isolated-player-snapshot';
@@ -2300,10 +2393,14 @@ class VideoExtractor {
       const controlsLabel = mainCandidate.hasPlayButton
         ? 'playable controls verified'
         : 'main player';
+      const thumbLabel =
+        thumbResult?.sourceType === 'og-image'
+          ? ', Page Preview Image (og:image)'
+          : '';
       const selectionReason =
         totalVideosOnPage > 1
-          ? `Main playable video selected (1 of ${totalVideosOnPage} on page, ${mainCandidate.width}×${mainCandidate.height}, ${controlsLabel})`
-          : `Main playable video (${mainCandidate.width}×${mainCandidate.height}, ${controlsLabel})`;
+          ? `Main playable video selected (1 of ${totalVideosOnPage} on page, ${mainCandidate.width}×${mainCandidate.height}, ${controlsLabel}${thumbLabel})`
+          : `Main playable video (${mainCandidate.width}×${mainCandidate.height}, ${controlsLabel}${thumbLabel})`;
 
       const cleanTitle =
         primaryJsonLd?.name ||

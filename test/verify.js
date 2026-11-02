@@ -38,6 +38,9 @@ async function createMockWebsitesServer() {
             <header><nav><a href="/categories/global-nav-noise">Global Nav Item</a></nav></header>
             <h1>Deep Dive Tutorial Video</h1>
             <video width="640" height="360" controls poster="${singlePoster}" src="movie.mp4" style="display:block;width:640px;height:360px;"></video>
+            <div class="video-stage">
+              <a href="/unrelated/stage-link">Stage Noise</a>
+            </div>
             <div data-testid="video-tags-wrapper">
               <div class="inner-level">
                 <ul>
@@ -45,6 +48,11 @@ async function createMockWebsitesServer() {
                   <li><a href="/tags/synthwave">#Synthwave <span class="count">1.4K</span></a></li>
                   <li><a href="/tags/all">Show More</a></li>
                 </ul>
+              </div>
+            </div>
+            <div data-role="clip-tags-section">
+              <div class="nested-role-tags">
+                <a href="/tag/retrowave"><span>Retrowave</span></a>
               </div>
             </div>
             <div class="meta-row">
@@ -120,6 +128,24 @@ async function createMockWebsitesServer() {
                 <button class="vjs-big-play-button" aria-label="Play Video" style="position:absolute;top:210px;left:390px;width:74px;height:50px;">Play</button>
                 <div class="vjs-control-bar" style="height:36px;"></div>
               </div>
+            </main>
+          </body>
+        </html>`);
+      return;
+    }
+
+    if (req.url === '/og-image-video') {
+      const ogPreviewImg = svgDataUrl('OG IMAGE PREVIEW 1280x720', '#0ea5e9', '#6366f1', 1280, 720);
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(`<!DOCTYPE html>
+        <html>
+          <head>
+            <title>Video Page With OG Preview Image</title>
+            <meta property="og:image" content="${ogPreviewImg}" />
+          </head>
+          <body style="margin:20px;background:#0f172a;color:#fff;">
+            <main style="margin:20px auto;width:854px;">
+              <video width="854" height="480" controls poster="${smallPoster}" src="feature.mp4" style="width:854px;height:480px;display:block;"></video>
             </main>
           </body>
         </html>`);
@@ -289,6 +315,36 @@ async function runTests() {
       `   [PASS] Ad vs Main Player: filtered out larger 900x500 ad video and selected 854x480 main playable video (${adVsMainData.entry.videoInfo.selectionReason}).`
     );
 
+    console.log('4c. Testing preference for Page Preview Image (og:image) and Retry Thumbnail Discovery...');
+    const manualRes = await fetch(`${appUrl}/api/entries/manual`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        url: `${mockSites.baseUrl}/og-image-video`,
+      }),
+    });
+    const manualData = await manualRes.json();
+    assert.strictEqual(manualRes.status, 201);
+    assert.strictEqual(manualData.entry.videoInfo.thumbnailSource, 'generated-placeholder');
+
+    const retryRes = await fetch(
+      `${appUrl}/api/entries/${manualData.entry.id}/refresh-thumbnail`,
+      {
+        method: 'POST',
+        headers: authHeaders,
+      }
+    );
+    const retryData = await retryRes.json();
+    assert.strictEqual(retryRes.status, 200);
+    assert.strictEqual(retryData.entry.videoInfo.thumbnailSource, 'og-image');
+    assert.ok(
+      retryData.entry.thumbnailDataUrl.startsWith('data:image/jpeg;base64,'),
+      'Expected retried thumbnail to be a JPEG data URL from og:image'
+    );
+    console.log(
+      `   [PASS] Page Preview Image (og:image) preferred and Retry Thumbnail Discovery updated entry (${retryData.entry.videoInfo.selectionReason}).`
+    );
+
     console.log('5. Testing page without video (skipping gracefully)...');
     const noVidRes = await fetch(`${appUrl}/api/entries/extract`, {
       method: 'POST',
@@ -345,10 +401,12 @@ async function runTests() {
     const singleEntry = app.vault.getEntry(singleEntryId);
     assert.ok(singleEntry.tags.includes('cyberpunk'), 'Should auto-discover cyberpunk tag from data-testid*="tag"');
     assert.ok(singleEntry.tags.includes('synthwave'), 'Should auto-discover synthwave tag and strip count badge');
+    assert.ok(singleEntry.tags.includes('retrowave'), 'Should auto-discover retrowave tag from data-role*="tag"');
     assert.ok(singleEntry.tags.includes('sci-fi'), 'Should auto-discover sci-fi from Categories: container');
     assert.ok(singleEntry.tags.includes('animation'), 'Should auto-discover animation from Categories: container');
     assert.ok(!singleEntry.tags.includes('show more'), 'Should exclude UI action links like Show More');
     assert.ok(!singleEntry.tags.includes('global nav item'), 'Should exclude global <header>/<nav> links');
+    assert.ok(!singleEntry.tags.includes('stage noise'), 'Should exclude false-positive substring matches like stage');
     console.log(
       `   [PASS] Batch processing & DOM Tag Auto-Discovery complete: ${finalJob.addedCount} added, ${finalJob.skippedCount} skipped, auto-discovered tags: [${singleEntry.tags.join(', ')}].`
     );

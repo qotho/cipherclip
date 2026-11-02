@@ -100,6 +100,8 @@ createApp({
 
     const editingEntry = ref(null);
     const refreshingThumb = ref(false);
+    const retryingThumbIds = ref([]);
+    const bulkRetryingThumbs = ref(false);
     const thumbDragOver = ref(false);
     const entryCandidateThumbnails = ref([]);
     const harvestingEntryImages = ref(false);
@@ -1164,22 +1166,85 @@ createApp({
       }
     }
 
-    async function handleRefreshThumbnail() {
-      if (!editingEntry.value || refreshingThumb.value) return;
-      refreshingThumb.value = true;
+    async function retryEntryThumbnail(entry) {
+      if (!entry || !entry.id) return;
+      if (retryingThumbIds.value.includes(entry.id)) return;
+      retryingThumbIds.value.push(entry.id);
+      if (editingEntry.value && editingEntry.value.id === entry.id) {
+        refreshingThumb.value = true;
+      }
       try {
         const res = await apiFetch(
-          `/api/entries/${editingEntry.value.id}/refresh-thumbnail`,
+          `/api/entries/${entry.id}/refresh-thumbnail`,
           { method: 'POST' }
         );
-        editingEntry.value.thumbnailDataUrl = res.entry.thumbnailDataUrl;
-        editingEntry.value.videoInfo = res.entry.videoInfo;
-        showToast('Video thumbnail refreshed.');
+        if (editingEntry.value && editingEntry.value.id === entry.id) {
+          editingEntry.value.thumbnailDataUrl = res.entry.thumbnailDataUrl;
+          editingEntry.value.videoInfo = res.entry.videoInfo;
+          if (res.entry.title) {
+            editingEntry.value.title = res.entry.title;
+          }
+          if (Array.isArray(res.entry.tags)) {
+            editingEntry.value.tags = res.entry.tags;
+            editingEntry.value.tagsInput = res.entry.tags.join(', ');
+          }
+        }
+        const sourceLabel =
+          res.entry.videoInfo?.thumbnailSource === 'og-image'
+            ? 'Page Preview Image (og:image)'
+            : res.entry.videoInfo?.thumbnailSource || 'updated';
+        showToast(`Thumbnail updated (${sourceLabel}).`);
         await loadCatalog();
       } catch (err) {
         showToast(err.message, 'error');
       } finally {
-        refreshingThumb.value = false;
+        retryingThumbIds.value = retryingThumbIds.value.filter(
+          (id) => id !== entry.id
+        );
+        if (editingEntry.value && editingEntry.value.id === entry.id) {
+          refreshingThumb.value = false;
+        }
+      }
+    }
+
+    async function handleRefreshThumbnail() {
+      if (!editingEntry.value) return;
+      await retryEntryThumbnail(editingEntry.value);
+    }
+
+    async function handleBulkRetryThumbnails() {
+      if (selectedEntryIds.value.length === 0 || bulkRetryingThumbs.value) return;
+      bulkRetryingThumbs.value = true;
+      const ids = [...selectedEntryIds.value];
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const id of ids) {
+        if (!retryingThumbIds.value.includes(id)) {
+          retryingThumbIds.value.push(id);
+        }
+        try {
+          await apiFetch(`/api/entries/${id}/refresh-thumbnail`, {
+            method: 'POST',
+          });
+          successCount++;
+          await loadCatalog();
+        } catch {
+          failCount++;
+        } finally {
+          retryingThumbIds.value = retryingThumbIds.value.filter((x) => x !== id);
+        }
+      }
+
+      bulkRetryingThumbs.value = false;
+      selectedEntryIds.value = [];
+      if (failCount === 0) {
+        showToast(`Retried thumbnail discovery for ${successCount} entry(s).`);
+      } else {
+        showToast(
+          `Thumbnail retry finished: ${successCount} updated, ${failCount} failed.`,
+          'warn'
+        );
       }
     }
 
@@ -1485,6 +1550,8 @@ createApp({
       currentBatchProcessingUrl,
       editingEntry,
       refreshingThumb,
+      retryingThumbIds,
+      bulkRetryingThumbs,
       thumbDragOver,
       entryCandidateThumbnails,
       harvestingEntryImages,
@@ -1524,7 +1591,9 @@ createApp({
       appendTagToEditingEntry,
       handleDiscoverEntryTags,
       saveEntryEdits,
+      retryEntryThumbnail,
       handleRefreshThumbnail,
+      handleBulkRetryThumbnails,
       handleClipboardButtonPaste,
       handleThumbnailDrop,
       handleThumbnailFileSelect,
